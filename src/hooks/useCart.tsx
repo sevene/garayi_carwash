@@ -296,15 +296,49 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
         try {
             let tickets: OpenTicket[] = [];
 
-            // 1. Try Online Fetch
+            // 1. Try Online Fetch & Cache or Load from Cache
             if (navigator.onLine) {
                 try {
                     const res = await fetch('/api/tickets', { cache: 'no-store' });
                     if (res.ok) {
                         tickets = await res.json();
+
+                        // Cache these server tickets to local DB for offline viewing
+                        if (typeof window !== 'undefined') {
+                            const { db } = await import('@/lib/db-client');
+                            // Clear old synced tickets to avoid ghosts
+                            // We delete where status is 'synced' or undefined (legacy)
+                            const oldSynced = await db.orders.where('status').anyOf('synced', 'completed').toArray();
+                            await db.orders.bulkDelete(oldSynced.map(o => o.id!));
+
+                            // Bulk add new server tickets as 'synced'
+                            // We must map them to the OfflineOrder format
+                            const toCache = tickets.map(t => ({
+                                tempId: t._id, // Server ID matches tempId for synced
+                                items: t.items,
+                                total: t.total,
+                                customerId: typeof t.customer === 'object' ? t.customer?._id : t.customer,
+                                status: 'synced' as const, // TS Check
+                                createdAt: new Date(t.createdAt).getTime(),
+                                payload: { ...t, id: t._id } // Store full payload
+                            }));
+
+                            await db.orders.bulkAdd(toCache);
+                        }
                     }
                 } catch (e) {
                     console.warn("Fetch tickets failed", e);
+                    // Fallback to cache if fetch fails despite being 'online'
+                    const { db } = await import('@/lib/db-client');
+                    const cached = await db.orders.where('status').equals('synced').toArray();
+                    tickets = cached.map(o => o.payload);
+                }
+            } else {
+                // Offline: Load 'synced' tickets from cache
+                if (typeof window !== 'undefined') {
+                    const { db } = await import('@/lib/db-client');
+                    const cached = await db.orders.where('status').equals('synced').toArray();
+                    tickets = cached.map(o => o.payload);
                 }
             }
 
