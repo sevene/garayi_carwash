@@ -70,27 +70,39 @@ registerRoute(
 
 
 // 3. BACKGROUND SYNC LISTENER
+// 3. BACKGROUND SYNC LISTENER
 self.addEventListener('sync', (event: Event) => {
     const syncEvent = event as SyncEvent;
     if (syncEvent.tag === 'garayi-sync') {
         console.log('[SW] Background Sync Triggered!');
-        syncEvent.waitUntil((async () => {
-            try {
-                const o = await syncPendingOrders();
-                const m = await syncPendingMutations();
 
-                if (o.syncedCount > 0 || m.syncedCount > 0) {
-                    console.log(`[SW] Sync success: ${o.syncedCount} orders, ${m.syncedCount} mutations`);
+        // Use Promise chain instead of async/await to avoid _async_to_generator runtime errors
+        // in some build environments (Next-PWA + Webpack/Babel issues)
+        const syncTask = syncPendingOrders()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .then((ordersResult: any) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return syncPendingMutations().then((mutationsResult: any) => {
+                    return { ordersResult, mutationsResult };
+                });
+            })
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .then(({ ordersResult, mutationsResult }: any) => {
+                if (ordersResult.syncedCount > 0 || mutationsResult.syncedCount > 0) {
+                    console.log(`[SW] Sync success: ${ordersResult.syncedCount} orders, ${mutationsResult.syncedCount} mutations`);
 
                     // Notify clients to refresh UI
-                    const clients = await self.clients.matchAll();
-                    clients.forEach(client => {
-                        client.postMessage({ type: 'SYNC_COMPLETE' });
+                    self.clients.matchAll().then((clients) => {
+                        clients.forEach(client => {
+                            client.postMessage({ type: 'SYNC_COMPLETE' });
+                        });
                     });
                 }
-            } catch (err) {
+            })
+            .catch((err) => {
                 console.error('[SW] Sync failed', err);
-            }
-        })());
+            });
+
+        syncEvent.waitUntil(syncTask);
     }
 });

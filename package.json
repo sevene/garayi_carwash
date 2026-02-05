@@ -2,6 +2,10 @@
   "name": "garayi-carwash",
   "version": "0.1.0",
   "private": true,
+  "browserslist": [
+    "defaults",
+    "not ie <= 11"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
