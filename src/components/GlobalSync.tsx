@@ -22,10 +22,24 @@ export default function GlobalSync() {
 
             for (const order of pendingOrders) {
                 try {
-                    // Determine URL based on order ID existence?
-                    // Usually offline orders are NEW, so POST /api/tickets
-                    const res = await fetch('/api/tickets', {
-                        method: 'POST',
+                    // Check if this is an update to an existing ticket (has an ID/tempId that matches a server ID format?)
+                    // Or simply if the payload carries an ID that isn't a temporary one?
+                    // Safe bet: If payload has an _id or id, treat as PUT?
+                    // Typically 'new' offline orders generated a random UUID as tempId.
+
+                    const payloadId = order.payload.id || order.payload._id;
+                    const isUpdate = !!payloadId && !payloadId.startsWith('temp_');
+
+                    let url = '/api/tickets';
+                    let method = 'POST';
+
+                    if (isUpdate) {
+                        url = `/api/tickets/${payloadId}`;
+                        method = 'PUT';
+                    }
+
+                    const res = await fetch(url, {
+                        method,
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(order.payload)
                     });

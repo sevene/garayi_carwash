@@ -331,11 +331,18 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                     crew: o.payload.crew
                 }));
 
-                // Basic protection against duplicates if server has synced but local hasn't updated yet (rare with proper sync)
-                const existingIds = new Set(tickets.map(t => t._id));
-                const uniqueLocal = localTickets.filter(t => !existingIds.has(t._id));
+                // Prioritize Local 'Pending' Tickets over Server Tickets
+                // If we have a local pending edit, it is newer than what we just fetched (unless sync just happened)
+                const localMap = new Map(localTickets.map(t => [t._id, t]));
 
-                tickets = [...tickets, ...uniqueLocal];
+                // 1. Replace server tickets with their local pending versions if they exist
+                tickets = tickets.map(t => localMap.has(t._id) ? localMap.get(t._id)! : t);
+
+                // 2. Add new purely local tickets (temp IDs) that aren't in the server list
+                const serverIds = new Set(tickets.map(t => t._id));
+                const newLocal = localTickets.filter(t => !serverIds.has(t._id));
+
+                tickets = [...tickets, ...newLocal];
             }
 
             setOpenTickets(tickets);
@@ -504,15 +511,32 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                         });
                         toast.info("Offline: Local Ticket Updated");
                     } else {
-                        // Server ticket -> Queue Mutation
-                        await db.mutations.add({
-                            type: 'update',
-                            collection: 'tickets',
-                            payload: { ...payload, id: currentTicketId },
-                            status: 'pending',
-                            createdAt: Date.now()
-                        });
-                        toast.info("Offline: Update Queued for Sync");
+                        // Server ticket -> We MUST save this to db.orders so it appears in the UI as a pending ticket
+                        // We use the server ID as the tempId so we can track it.
+
+                        // Check if we already have a pending edit for this server ticket
+                        const existingPending = await db.orders.where('tempId').equals(currentTicketId!).first();
+
+                        if (existingPending) {
+                            await db.orders.update(existingPending.id!, {
+                                items: payload.items,
+                                total: payload.total,
+                                customerId: payload.customer,
+                                payload: { ...payload, id: currentTicketId, name: nameToSave }
+                            });
+                            toast.info("Offline: Local Edit Updated");
+                        } else {
+                            await db.orders.add({
+                                tempId: currentTicketId!, // Use server ID as identifier
+                                items: payload.items,
+                                total: payload.total,
+                                customerId: payload.customer,
+                                status: 'pending',
+                                createdAt: Date.now(),
+                                payload: { ...payload, id: currentTicketId, name: nameToSave }
+                            });
+                            toast.info("Offline: Ticket Updated Locally (Pending Sync)");
+                        }
                     }
                 }
             }
