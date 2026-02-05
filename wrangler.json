@@ -1,0 +1,16 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "garayi-carwash",
+	"compatibility_date": "2024-11-18",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "garayi-carwash",
+			"database_id": "807f35e3-1f47-4d8b-9ea3-c132c8826b0b"
+		}
+	],
+	"pages_build_output_dir": ".open-next/assets"
+}

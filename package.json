@@ -1,0 +1,45 @@
+{
+  "name": "garayi-carwash",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "pages:build": "next build && npx @opennextjs/cloudflare build && node scripts/copy-worker.js",
+    "pages:dev": "npx wrangler pages dev .open-next/assets --compatibility-flag=nodejs_compat --binding NODE_ENV=production",
+    "db:setup:local": "wrangler d1 execute garayi-carwash --local --file=schema.sql",
+    "db:init": "node scripts/setup-local-db.js"
+  },
+  "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
+    "@headlessui/react": "^2.2.9",
+    "@heroicons/react": "^2.2.0",
+    "chart.js": "^4.5.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "dexie": "^4.3.0",
+    "jose": "^6.1.3",
+    "next": "^15.1.11",
+    "react": "19.0.0",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "19.0.0",
+    "recharts": "^3.7.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@opennextjs/cloudflare": "^1.16.1",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "better-sqlite3": "^12.6.2",
+    "eslint": "^9",
+    "eslint-config-next": "^15.1.6",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wrangler": "^4.60.0"
+  }
+}

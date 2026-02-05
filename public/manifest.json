@@ -1,0 +1,16 @@
+{
+    "name": "Garayi Carwash POS",
+    "short_name": "Garayi POS",
+    "description": "Point of Sale System for Garayi Carwash",
+    "start_url": "/pos",
+    "display": "standalone",
+    "background_color": "#1f2937",
+    "theme_color": "#1f2937",
+    "icons": [
+        {
+            "src": "/logo-v4.png",
+            "sizes": "any",
+            "type": "image/png"
+        }
+    ]
+}

@@ -1,0 +1,4 @@
+/* Custom CSS to hide default browser validation messages */
+input:invalid:not(:focus):not(:placeholder-shown) {
+  border-color: red;
+}
