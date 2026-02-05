@@ -142,37 +142,67 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _liveTickets = useLiveQuery(async () => {
         // Get all orders (synced + pending)
-        // We filter out 'completed' or 'cancelled' if we only want open tickets
-        // The API returns non-PAID tickets.
         const orders = await db.orders
-            .where('status').notEqual('completed') // Assuming 'completed' means paid/archived
+            .where('status').notEqual('completed')
             .toArray();
 
-        // Sort: Pending first, then newest
-        return orders.sort((a, b) => {
-            if (a.status === 'pending' && b.status !== 'pending') return -1;
-            if (a.status !== 'pending' && b.status === 'pending') return 1;
-            return b.createdAt - a.createdAt;
-        }).map(o => ({
+        // 1. Map to OpenTicket format first
+        const mapped = orders.map(o => ({
             _id: o.tempId,
             name: o.payload.name || 'Order',
             total: o.total,
             cashierId: o.payload.cashierId || 'POS',
             timestamp: new Date(o.createdAt).toISOString(),
-            // Ensure items structure
             items: o.items || [],
             createdAt: new Date(o.createdAt).toISOString(),
             updatedAt: new Date(o.createdAt).toISOString(),
-            status: 'PENDING', // UI treats all active as pending payment
+            // Use payload status if available, unless pending sync
+            uiStatus: o.status === 'pending' ? 'PENDING' : (o.payload.status || 'QUEUED'),
             customer: o.customerId,
-            crew: o.payload.crew
+            crew: o.payload.crew,
+            isOfflinePending: o.status === 'pending'
+        }));
+
+        // 2. Deduplicate by _id (tempId)
+        // If we have both Synced and Pending for the same ID, keep Pending.
+        const uniqueMap = new Map();
+
+        mapped.forEach(ticket => {
+            const existing = uniqueMap.get(ticket._id);
+            if (!existing) {
+                uniqueMap.set(ticket._id, ticket);
+            } else {
+                // Collision!
+                if (ticket.isOfflinePending && !existing.isOfflinePending) {
+                    uniqueMap.set(ticket._id, ticket);
+                }
+                else if (ticket.isOfflinePending === existing.isOfflinePending) {
+                    // Keep newer
+                    if (new Date(ticket.updatedAt) > new Date(existing.updatedAt)) {
+                        uniqueMap.set(ticket._id, ticket);
+                    }
+                }
+            }
+        });
+
+        const uniqueTickets = Array.from(uniqueMap.values());
+
+        // 3. Sort: Pending first, then Newest
+        return uniqueTickets.sort((a, b) => {
+            if (a.isOfflinePending && !b.isOfflinePending) return -1;
+            if (!a.isOfflinePending && b.isOfflinePending) return 1;
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }).map(t => ({
+            ...t,
+            status: t.uiStatus as any, // Cast to expected type
+            // Remove helper prop
+            isOfflinePending: undefined
         }));
     }, []);
 
     // Sync _liveTickets to state (legacy compatibility)
     useEffect(() => {
         if (_liveTickets) {
-            // @ts-expect-error - Type mismatch on status string vs union, safe for display
             setOpenTickets(_liveTickets);
         }
     }, [_liveTickets]);
