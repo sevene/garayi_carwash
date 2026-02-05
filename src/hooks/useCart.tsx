@@ -3,6 +3,8 @@
 import { useState, useMemo, useContext, createContext, useEffect, useCallback } from 'react';
 import { Product } from '../lib/products';
 import { toast } from 'sonner';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db-client';
 
 // =========================================================================
 // TYPES
@@ -133,15 +135,94 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
     const [viewMode, setViewMode] = useState<CartViewMode>('TICKETS');
     const [openTickets, setOpenTickets] = useState<OpenTicket[]>([]);
 
+    // --- Live Data from IndexedDB ---
+    // We use useLiveQuery which automatically updates the component when DB changes.
+    // This allows proper "Reactive" UI based on Local DB.
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _liveTickets = useLiveQuery(async () => {
+        // Get all orders (synced + pending)
+        // We filter out 'completed' or 'cancelled' if we only want open tickets
+        // The API returns non-PAID tickets.
+        const orders = await db.orders
+            .where('status').notEqual('completed') // Assuming 'completed' means paid/archived
+            .toArray();
+
+        // Sort: Pending first, then newest
+        return orders.sort((a, b) => {
+            if (a.status === 'pending' && b.status !== 'pending') return -1;
+            if (a.status !== 'pending' && b.status === 'pending') return 1;
+            return b.createdAt - a.createdAt;
+        }).map(o => ({
+            _id: o.tempId,
+            name: o.payload.name || 'Order',
+            total: o.total,
+            cashierId: o.payload.cashierId || 'POS',
+            timestamp: new Date(o.createdAt).toISOString(),
+            // Ensure items structure
+            items: o.items || [],
+            createdAt: new Date(o.createdAt).toISOString(),
+            updatedAt: new Date(o.createdAt).toISOString(),
+            status: 'PENDING', // UI treats all active as pending payment
+            customer: o.customerId,
+            crew: o.payload.crew
+        }));
+    }, []);
+
+    // Sync _liveTickets to state (legacy compatibility)
+    useEffect(() => {
+        if (_liveTickets) {
+            // @ts-expect-error - Type mismatch on status string vs union, safe for display
+            setOpenTickets(_liveTickets);
+        }
+    }, [_liveTickets]);
+
     // Customer Management
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
     const [customers, setCustomers] = useState<any[]>(initialCustomers);
+    // Customers - Also Live
+    const liveCustomers = useLiveQuery(() => db.customers.toArray());
+
+    useEffect(() => {
+        if (liveCustomers) {
+            setCustomers(liveCustomers);
+        }
+    }, [liveCustomers]);
+
+    // Employees - Also Live
+    const liveEmployees = useLiveQuery(() => db.employees.toArray());
+    // We don't have setEmployees currently exposed but internal state uses initialEmployees
+    // Let's create a local state for it if not exists, but useCartState arg is initialEmployees
+    // We should probably just rely on liveEmployees
+
+
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [currentCustomer, setCurrentCustomer] = useState<any | null>(null);
 
-    // Crew Management - Per Item
+    // --- Background Sync Helper ---
+    const triggerBackgroundSync = useCallback(async () => {
+        if ('serviceWorker' in navigator && 'SyncManager' in window) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                // @ts-expect-error - SyncManager is not in default types
+                await reg.sync.register('garayi-sync');
+                console.log("Background sync registered: garayi-sync");
+            } catch (e) {
+                console.warn("Background sync registration failed", e);
+            }
+        }
+    }, []);
+
+
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [employees] = useState<any[]>(initialEmployees);
+    const [employees, setEmployees] = useState<any[]>(initialEmployees);
+    useEffect(() => {
+        if (liveEmployees) {
+            setEmployees(liveEmployees);
+        }
+    }, [liveEmployees]);
     const [itemCrew, setItemCrew] = useState<Record<string, string[]>>({}); // { itemId: [crewId1, crewId2] }
 
     // Crew Sidebar State
@@ -292,99 +373,10 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
     // --- API Helpers ---
 
     const fetchOpenTickets = useCallback(async () => {
-        setIsTicketsLoading(true);
-        try {
-            let tickets: OpenTicket[] = [];
-
-            // 1. Try Online Fetch & Cache or Load from Cache
-            if (navigator.onLine) {
-                try {
-                    const res = await fetch('/api/tickets', { cache: 'no-store' });
-                    if (res.ok) {
-                        tickets = await res.json();
-
-                        // Cache these server tickets to local DB for offline viewing
-                        if (typeof window !== 'undefined') {
-                            const { db } = await import('@/lib/db-client');
-                            // Clear old synced tickets to avoid ghosts
-                            // We delete where status is 'synced' or undefined (legacy)
-                            const oldSynced = await db.orders.where('status').anyOf('synced', 'completed').toArray();
-                            await db.orders.bulkDelete(oldSynced.map(o => o.id!));
-
-                            // Bulk add new server tickets as 'synced'
-                            // We must map them to the OfflineOrder format
-                            const toCache = tickets.map(t => ({
-                                tempId: t._id, // Server ID matches tempId for synced
-                                items: t.items,
-                                total: t.total,
-                                customerId: typeof t.customer === 'object' ? t.customer?._id : t.customer,
-                                status: 'synced' as const, // TS Check
-                                createdAt: new Date(t.createdAt).getTime(),
-                                payload: { ...t, id: t._id } // Store full payload
-                            }));
-
-                            await db.orders.bulkAdd(toCache);
-                        }
-                    }
-                } catch (e) {
-                    console.warn("Fetch tickets failed", e);
-                    // Fallback to cache if fetch fails despite being 'online'
-                    const { db } = await import('@/lib/db-client');
-                    const cached = await db.orders.where('status').equals('synced').toArray();
-                    tickets = cached.map(o => o.payload);
-                }
-            } else {
-                // Offline: Load 'synced' tickets from cache
-                if (typeof window !== 'undefined') {
-                    const { db } = await import('@/lib/db-client');
-                    const cached = await db.orders.where('status').equals('synced').toArray();
-                    tickets = cached.map(o => o.payload);
-                }
-            }
-
-            // 2. Merge with Offline Tickets (db.orders with status='pending')
-            if (typeof window !== 'undefined') {
-                const { db } = await import('@/lib/db-client');
-                const localOrders = await db.orders.where('status').equals('pending').toArray();
-
-                const localTickets = localOrders.map(o => ({
-                    _id: o.tempId,
-                    name: o.payload.name || 'Offline Ticket',
-                    total: o.total,
-                    cashierId: o.payload.cashierId || 'POS-Offline',
-                    timestamp: new Date(o.createdAt).toISOString(),
-                    items: o.items.map((i: any) => ({
-                        ...i,
-                        // Ensure items have necessary display fields
-                        productName: i.productName || 'Item'
-                    })),
-                    createdAt: new Date(o.createdAt).toISOString(),
-                    updatedAt: new Date(o.createdAt).toISOString(),
-                    status: 'PENDING' as const,
-                    customer: o.customerId,
-                    crew: o.payload.crew
-                }));
-
-                // Prioritize Local 'Pending' Tickets over Server Tickets
-                // If we have a local pending edit, it is newer than what we just fetched (unless sync just happened)
-                const localMap = new Map(localTickets.map(t => [t._id, t]));
-
-                // 1. Replace server tickets with their local pending versions if they exist
-                tickets = tickets.map(t => localMap.has(t._id) ? localMap.get(t._id)! : t);
-
-                // 2. Add new purely local tickets (temp IDs) that aren't in the server list
-                const serverIds = new Set(tickets.map(t => t._id));
-                const newLocal = localTickets.filter(t => !serverIds.has(t._id));
-
-                tickets = [...tickets, ...newLocal];
-            }
-
-            setOpenTickets(tickets);
-        } catch (err) {
-            console.error("Error in fetchOpenTickets", err);
-        } finally {
-            setIsTicketsLoading(false);
-        }
+        // NO-OP: We now rely on useLiveQuery
+        // But we can trigger a background sync here if we really want to check for new info
+        // triggerBackgroundPull(); // We might implement this later
+        console.log("fetchOpenTickets called - handled by LiveQuery/Sync");
     }, []);
 
     // Load tickets on mount
@@ -531,6 +523,7 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                         payload: { ...payload, name: nameToSave }
                     });
                     toast.info("Offline: Ticket Saved Locally");
+                    triggerBackgroundSync();
                 } else {
                     // Check if updating a local ticket or server ticket
                     const existingLocal = await db.orders.where('tempId').equals(tempId).first();
@@ -544,6 +537,7 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                             payload: { ...payload, name: nameToSave }
                         });
                         toast.info("Offline: Local Ticket Updated");
+                        triggerBackgroundSync();
                     } else {
                         // Server ticket -> We MUST save this to db.orders so it appears in the UI as a pending ticket
                         // We use the server ID as the tempId so we can track it.
@@ -559,6 +553,7 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                                 payload: { ...payload, id: currentTicketId, name: nameToSave }
                             });
                             toast.info("Offline: Local Edit Updated");
+                            triggerBackgroundSync();
                         } else {
                             await db.orders.add({
                                 tempId: currentTicketId!, // Use server ID as identifier
@@ -570,6 +565,7 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                                 payload: { ...payload, id: currentTicketId, name: nameToSave }
                             });
                             toast.info("Offline: Ticket Updated Locally (Pending Sync)");
+                            triggerBackgroundSync();
                         }
                     }
                 }
@@ -663,6 +659,7 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
             });
 
             toast.warning(`Offline Mode: Order Saved Locally! (${formatCurrency(total)})`);
+            triggerBackgroundSync();
 
             setCurrentTicketId(null);
             setCurrentTicketName('New Order');
@@ -678,6 +675,26 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
             setIsProcessing(false);
         }
     }, [cartItems.length, isProcessing, currentTicketId, buildPayload, total, clearCart, fetchOpenTickets, switchToTicketsView, formatCurrency]);
+
+
+    // Listen for SW Sync Complete Message (Placed here to access fetchOpenTickets)
+    useEffect(() => {
+        const handleMessage = (event: MessageEvent) => {
+            if (event.data && event.data.type === 'SYNC_COMPLETE') {
+                console.log("Received SYNC_COMPLETE from SW");
+                fetchOpenTickets();
+                toast.success("Background Sync Complete!");
+            }
+        };
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', handleMessage);
+        }
+        return () => {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.removeEventListener('message', handleMessage);
+            }
+        };
+    }, [fetchOpenTickets]);
 
 
     // --- Final Context Value (Memoized) ---

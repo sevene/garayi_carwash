@@ -1,124 +1,39 @@
 'use client';
 
 import { useEffect } from 'react';
-import { db } from '@/lib/db-client';
 import { toast } from 'sonner';
-import { useCart } from '@/hooks/useCart';
+import { syncPendingOrders, syncPendingMutations, syncEvaluationsIntoLocalDB } from '@/lib/sync';
 
 export default function GlobalSync() {
-    // expose fetchOpenTickets to refresh UI after sync
-    const { fetchOpenTickets } = useCart();
-
     useEffect(() => {
-        const syncPendingOrders = async () => {
-            // 1. Check for pending orders
-            // Uses the 'status' index we defined in db-client
-            const pendingOrders = await db.orders.where('status').equals('pending').toArray();
-
-            if (pendingOrders.length === 0) return false;
-
-            console.log(`Found ${pendingOrders.length} pending offline orders. Syncing...`);
-            let syncedCount = 0;
-
-            for (const order of pendingOrders) {
-                try {
-                    // Check if this is an update to an existing ticket (has an ID/tempId that matches a server ID format?)
-                    // Or simply if the payload carries an ID that isn't a temporary one?
-                    // Safe bet: If payload has an _id or id, treat as PUT?
-                    // Typically 'new' offline orders generated a random UUID as tempId.
-
-                    const payloadId = order.payload.id || order.payload._id;
-                    const isUpdate = !!payloadId && !payloadId.startsWith('temp_');
-
-                    let url = '/api/tickets';
-                    let method = 'POST';
-
-                    if (isUpdate) {
-                        url = `/api/tickets/${payloadId}`;
-                        method = 'PUT';
-                    }
-
-                    const res = await fetch(url, {
-                        method,
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(order.payload)
-                    });
-
-                    if (res.ok) {
-                        // Mark as synced/delete
-                        await db.orders.update(order.id!, { status: 'synced' });
-                        // Or delete it if we don't want history clutter
-                        // await db.orders.delete(order.id!);
-                        syncedCount++;
-                    } else {
-                        console.error("Failed to sync order", order.id, await res.text());
-                    }
-                } catch (err) {
-                    console.error("Network error syncing order", order.id, err);
-                }
-            }
-
-            if (syncedCount > 0) {
-                toast.success(`Synced ${syncedCount} offline orders!`);
-                return true;
-            }
-            return false;
+        const syncOrders = async () => {
+            const { syncedCount } = await syncPendingOrders();
+            return { syncedCount };
         };
 
-        const syncPendingMutations = async () => {
-            const pendingMutations = await db.mutations.where('status').equals('pending').toArray();
-            if (pendingMutations.length === 0) return false;
-
-            console.log(`Found ${pendingMutations.length} pending mutations. Syncing...`);
-            let mutationCount = 0;
-
-            for (const m of pendingMutations) {
-                try {
-                    let url = '';
-                    let method = '';
-                    const apiBase = `/api/${m.collection}`;
-
-                    if (m.type === 'create') {
-                        method = 'POST';
-                        url = apiBase;
-                    } else { // update or delete
-                        method = m.type === 'update' ? 'PUT' : 'DELETE';
-                        url = `${apiBase}/${m.payload.id || m.payload._id}`;
-                    }
-
-                    const res = await fetch(url, {
-                        method,
-                        headers: { 'Content-Type': 'application/json' },
-                        body: m.type !== 'delete' ? JSON.stringify(m.payload) : undefined
-                    });
-
-                    if (res.ok) {
-                        await db.mutations.update(m.id!, { status: 'synced' });
-                        mutationCount++;
-                    } else {
-                        console.error("Mutation sync failed", m, await res.text());
-                    }
-                } catch (e) {
-                    console.error("Network error syncing mutation", m, e);
-                }
-            }
-
-            if (mutationCount > 0) {
-                toast.success(`Synced ${mutationCount} offline changes`);
-                return true;
-            }
-            return false;
+        const syncMutations = async () => {
+            const { syncedCount } = await syncPendingMutations();
+            return { syncedCount };
         };
 
         const runGlobalSync = async () => {
             if (navigator.onLine) {
-                const ordersSynced = await syncPendingOrders();
-                const mutationsSynced = await syncPendingMutations();
+                // 1. Pull latest data from cloud to local (Full Mirror)
+                const pullSuccess = await syncEvaluationsIntoLocalDB();
+                if (pullSuccess) {
+                    console.log("Full Sync Pull Complete");
+                }
 
-                // If anything changed, refresh the cart view
-                if (ordersSynced || mutationsSynced) {
-                    console.log("Sync complete, refreshing tickets list...");
-                    fetchOpenTickets();
+                // 2. Push Pending Changes
+                const { syncedCount: ordersCount } = await syncOrders();
+                const { syncedCount: mutationsCount } = await syncMutations();
+
+                if (pullSuccess || ordersCount > 0 || mutationsCount > 0) {
+                    console.log(`Sync Complete. Pull: ${pullSuccess}, Orders: ${ordersCount}, Mutations: ${mutationsCount}`);
+                    // Toast only on user-visible changes to avoid spam on background syncs
+                    if (ordersCount > 0 || mutationsCount > 0) {
+                        toast.success("Cloud Sync Complete");
+                    }
                 }
             }
         };
@@ -137,7 +52,7 @@ export default function GlobalSync() {
         return () => {
             window.removeEventListener('online', handleOnline);
         };
-    }, [fetchOpenTickets]);
+    }, []);
 
     return null; // Headless component
 }
