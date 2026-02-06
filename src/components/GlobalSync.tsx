@@ -35,32 +35,37 @@ export default function GlobalSync() {
             return { syncedCount };
         };
 
-        const runGlobalSync = async () => {
+        const runGlobalSync = async (isPolling = false) => {
             if (navigator.onLine) {
                 // 1. Push Pending Changes (Priority: Ensure server has our updates)
                 const { syncedCount: ordersCount } = await syncOrders();
                 const { syncedCount: mutationsCount } = await syncMutations();
+                const hasLocalChanges = ordersCount > 0 || mutationsCount > 0;
 
-                // 2. Pull latest data from cloud to local (Full Mirror)
-                // We do this AFTER pushing so we get the canonical version of what we just uploaded
-                const pullSuccess = await syncEvaluationsIntoLocalDB();
+                // 2. Pull latest data: Only if manual trigger OR we pushed something.
+                // This prevents spamming the server with full downloads every 15s.
+                let pullSuccess = false;
+                if (!isPolling || hasLocalChanges) {
+                    pullSuccess = await syncEvaluationsIntoLocalDB();
+                }
 
-                if (pullSuccess && (ordersCount > 0 || mutationsCount > 0)) {
+                if (pullSuccess && hasLocalChanges) {
                     console.log("Sync Complete: Pushed changes and refreshed local DB.");
                     toast.success("Cloud Sync Complete");
-                } else if (pullSuccess) {
+                } else if (pullSuccess && !isPolling) {
+                    // Only log/toast refresh if it wasn't a silent poll
                     console.log("Data Refresh Complete");
                 }
             }
         };
 
-        // Run on mount
-        runGlobalSync();
+        // Run on mount (Initial Sync)
+        runGlobalSync(false);
 
         // Listen for online status
         const handleOnline = () => {
             console.log("App is back online. Running global sync...");
-            runGlobalSync();
+            runGlobalSync(false);
         };
 
         window.addEventListener('online', handleOnline);
@@ -69,9 +74,8 @@ export default function GlobalSync() {
         // This covers cases where the 'online' event is missed or the browser state is flaky
         const intervalId = setInterval(() => {
             if (navigator.onLine) {
-                // We run the full sync logic, which internally checks if there are pending items
-                // If nothing is pending, it does very little work (cheap DB query)
-                runGlobalSync();
+                // Background poll - only sync if we have local changes
+                runGlobalSync(true);
             }
         }, 15000);
 
