@@ -482,12 +482,12 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
 
     const buildPayload = useCallback((status: 'PENDING' | 'COMPLETED', nameOverride?: string, paymentMethod?: string) => ({
         status,
-        items: cartItems.map(i => ({
-            productId: i.product._id,
-            productName: i.name,
-            quantity: i.quantity,
-            unitPrice: i.price,
-            crew: itemCrew[i._id] || []
+        items: cartItems.filter(i => i?.product).map(i => ({
+            productId: i.product?._id || i._id || 'UNKNOWN',
+            productName: i.name || 'Unknown Item',
+            quantity: i.quantity || 1,
+            unitPrice: i.price || 0,
+            crew: (i._id && itemCrew[i._id]) ? itemCrew[i._id] : []
         })),
         subtotal,
         tax,
