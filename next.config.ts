@@ -16,7 +16,6 @@ const withPWA = withPWAInit({
     // Skip Babel transpilation that causes _async_to_generator issues
   },
   // Explicitly set to not use Babel for the worker
-  // @ts-expect-error - experimental option
   extendDefaultRuntimeCaching: false,
 });
 
