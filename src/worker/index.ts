@@ -14,6 +14,38 @@ interface SyncEvent extends Event {
     waitUntil(f: Promise<void>): void;
 }
 
+// @ts-ignore
+// Polyfill for Babel/SWC async helper to fix "ReferenceError: _async_to_generator is not defined"
+// This is required because Next-PWA sometimes compiles imports with async/await but fails to inject the helper in SW scope.
+self._async_to_generator = function (fn: any) {
+    return function (this: any) {
+        // eslint-disable-next-line
+        var gen = fn.apply(this, arguments);
+        return new Promise(function (resolve, reject) {
+            // eslint-disable-next-line
+            function step(key: any, arg?: any) {
+                try {
+                    var info = gen[key](arg);
+                    var value = info.value;
+                } catch (error) {
+                    reject(error);
+                    return;
+                }
+                if (info.done) {
+                    resolve(value);
+                } else {
+                    Promise.resolve(value).then(function (value) {
+                        step("next", value);
+                    }, function (err) {
+                        step("throw", err);
+                    });
+                }
+            }
+            step("next");
+        });
+    };
+};
+
 // Take control immediately
 self.skipWaiting();
 clientsClaim();
