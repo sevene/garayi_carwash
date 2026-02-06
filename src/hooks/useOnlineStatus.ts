@@ -6,13 +6,8 @@ import { useState, useEffect } from 'react';
  * even if the server is unreachable (e.g. valid WiFi but no internet/server down).
  */
 export function useOnlineStatus() {
-    // Initialize with safe check for SSR
-    const [isOnline, setIsOnline] = useState(() => {
-        if (typeof navigator !== 'undefined') {
-            return navigator.onLine;
-        }
-        return true; // Assume online on server/check
-    });
+    // Initialize with true to match SSR and avoid Hydration Mismatch (Error #418)
+    const [isOnline, setIsOnline] = useState(true);
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -21,10 +16,8 @@ export function useOnlineStatus() {
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 
-        // Sync on mount in case it changed between init and mount
-        if (typeof navigator !== 'undefined') {
-            setIsOnline(navigator.onLine);
-        }
+        // Sync on mount - now safe to access window/navigator
+        setIsOnline(navigator.onLine);
 
         return () => {
             window.removeEventListener('online', handleOnline);
