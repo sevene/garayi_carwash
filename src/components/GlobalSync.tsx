@@ -8,7 +8,7 @@ export default function GlobalSync() {
     useEffect(() => {
         // FORCE SW UPDATE: Unregister old workers to clear 'ReferenceError' crashes
         // This ensures users get the new sw.js with the polyfill.
-        const SW_RESET_KEY = 'sw-reset-v2'; // Bump this if we need to force reset again
+        const SW_RESET_KEY = 'sw-reset-v3'; // Bump this if we need to force reset again
         if (typeof window !== 'undefined' && !localStorage.getItem(SW_RESET_KEY)) {
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.getRegistrations().then((registrations) => {

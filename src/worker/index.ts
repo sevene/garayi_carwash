@@ -27,6 +27,9 @@ registerRoute(
 );
 
 // API Calls - Network First
+// Disabled: We are relying on internal app logic (Dexie + Sync) for offline data.
+// This prevents Service Worker from intercepting API calls and potentially crashing.
+/*
 registerRoute(
     /^https?.+?\/api\/.+$/,
     new NetworkFirst({
@@ -39,6 +42,7 @@ registerRoute(
         ]
     })
 );
+*/
 
 // Navigation (Pages) - Network First
 registerRoute(
