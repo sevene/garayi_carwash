@@ -9,15 +9,28 @@ export interface SyncResult {
 
 // Helper function to handle async order sync using raw Promises
 function processOrderSync(order: any): Promise<boolean> {
-    const payloadId = order.payload.id || order.payload._id;
-    const isUpdate = !!payloadId && !payloadId.startsWith('temp_');
-    const url = isUpdate ? `/api/tickets/${payloadId}` : '/api/tickets';
+    // Robust ID resolving: Check payload first, then fallback to tempId if it's a server ID
+    let finalId = order.payload.id || order.payload._id;
+
+    // If payload ID is missing but tempId is a server ID (doesn't start with temp_), use tempId
+    if (!finalId && order.tempId && !order.tempId.startsWith('temp_')) {
+        finalId = order.tempId;
+    }
+
+    const isUpdate = !!finalId && !String(finalId).startsWith('temp_');
+    const url = isUpdate ? `/api/tickets/${finalId}` : '/api/tickets';
     const method = isUpdate ? 'PUT' : 'POST';
+
+    // Ensure payload has the ID if it's an update
+    const finalPayload = { ...order.payload };
+    if (isUpdate && !finalPayload.id) {
+        finalPayload.id = finalId;
+    }
 
     return fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(order.payload)
+        body: JSON.stringify(finalPayload)
     })
         .then(res => {
             if (!res.ok) {
