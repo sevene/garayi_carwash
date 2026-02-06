@@ -5,46 +5,8 @@ import { precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
 import { NetworkFirst, StaleWhileRevalidate, NetworkOnly } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
-import { syncPendingOrders, syncPendingMutations } from '@/lib/sync';
 
 declare const self: ServiceWorkerGlobalScope;
-
-interface SyncEvent extends Event {
-    readonly tag: string;
-    waitUntil(f: Promise<void>): void;
-}
-
-// @ts-ignore
-// Polyfill for Babel/SWC async helper to fix "ReferenceError: _async_to_generator is not defined"
-// This is required because Next-PWA sometimes compiles imports with async/await but fails to inject the helper in SW scope.
-self._async_to_generator = function (fn: any) {
-    return function (this: any) {
-        // eslint-disable-next-line
-        var gen = fn.apply(this, arguments);
-        return new Promise(function (resolve, reject) {
-            // eslint-disable-next-line
-            function step(key: any, arg?: any) {
-                try {
-                    var info = gen[key](arg);
-                    var value = info.value;
-                } catch (error) {
-                    reject(error);
-                    return;
-                }
-                if (info.done) {
-                    resolve(value);
-                } else {
-                    Promise.resolve(value).then(function (value) {
-                        step("next", value);
-                    }, function (err) {
-                        step("throw", err);
-                    });
-                }
-            }
-            step("next");
-        });
-    };
-};
 
 // Take control immediately
 self.skipWaiting();
@@ -99,42 +61,3 @@ registerRoute(
     /^https?.+?\.(?:png|jpg|jpeg|svg|webp|gif|ico)$/,
     new StaleWhileRevalidate()
 );
-
-
-// 3. BACKGROUND SYNC LISTENER
-// 3. BACKGROUND SYNC LISTENER
-self.addEventListener('sync', (event: Event) => {
-    const syncEvent = event as SyncEvent;
-    if (syncEvent.tag === 'garayi-sync') {
-        console.log('[SW] Background Sync Triggered!');
-
-        // Use Promise chain instead of async/await to avoid _async_to_generator runtime errors
-        // in some build environments (Next-PWA + Webpack/Babel issues)
-        const syncTask = syncPendingOrders()
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .then((ordersResult: any) => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                return syncPendingMutations().then((mutationsResult: any) => {
-                    return { ordersResult, mutationsResult };
-                });
-            })
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .then(({ ordersResult, mutationsResult }: any) => {
-                if (ordersResult.syncedCount > 0 || mutationsResult.syncedCount > 0) {
-                    console.log(`[SW] Sync success: ${ordersResult.syncedCount} orders, ${mutationsResult.syncedCount} mutations`);
-
-                    // Notify clients to refresh UI
-                    self.clients.matchAll().then((clients) => {
-                        clients.forEach(client => {
-                            client.postMessage({ type: 'SYNC_COMPLETE' });
-                        });
-                    });
-                }
-            })
-            .catch((err) => {
-                console.error('[SW] Sync failed', err);
-            });
-
-        syncEvent.waitUntil(syncTask);
-    }
-});
