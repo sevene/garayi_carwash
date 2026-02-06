@@ -6,6 +6,25 @@ import { syncPendingOrders, syncPendingMutations, syncEvaluationsIntoLocalDB } f
 
 export default function GlobalSync() {
     useEffect(() => {
+        // FORCE SW UPDATE: Unregister old workers to clear 'ReferenceError' crashes
+        // This ensures users get the new sw.js with the polyfill.
+        const SW_RESET_KEY = 'sw-reset-v2'; // Bump this if we need to force reset again
+        if (typeof window !== 'undefined' && !localStorage.getItem(SW_RESET_KEY)) {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then((registrations) => {
+                    for (const registration of registrations) {
+                        console.log('Force unregistering stale SW:', registration);
+                        registration.unregister();
+                    }
+                    localStorage.setItem(SW_RESET_KEY, 'true');
+                    console.log('Service Workers cleared. Reloading next visit will install fresh SW.');
+                    // Optional: Force reload immediately to clear state?
+                    // window.location.reload();
+                    // Better to let them browse, next load fixes it.
+                });
+            }
+        }
+
         const syncOrders = async () => {
             const { syncedCount } = await syncPendingOrders();
             return { syncedCount };
