@@ -28,7 +28,11 @@ export default function GlobalSync() {
 
                 if (pullSuccess && (ordersCount > 0 || mutationsCount > 0)) {
                     console.log("Sync Complete: Pushed changes and refreshed local DB.");
-                    toast.success("Cloud Sync Complete");
+                    toast.success("Cloud Sync Complete - Refreshing UI...");
+                    // Force reload to ensure absolutely pristine state after offline edits
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
                 } else if (pullSuccess) {
                     console.log("Data Refresh Complete");
                 }
