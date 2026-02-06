@@ -13,9 +13,11 @@ const withPWA = withPWAInit({
   },
   workboxOptions: {
     disableDevLogs: true,
-    // When using swSrc, functionality is injected into the worker file
-    // instead of generated from these options.
-  }
+    // Skip Babel transpilation that causes _async_to_generator issues
+  },
+  // Explicitly set to not use Babel for the worker
+  // @ts-expect-error - experimental option
+  extendDefaultRuntimeCaching: false,
 });
 
 const nextConfig: NextConfig = {

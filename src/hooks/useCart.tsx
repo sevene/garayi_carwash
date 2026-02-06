@@ -564,15 +564,14 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                             items: payload.items,
                             total: payload.total,
                             customerId: payload.customer,
+                            status: 'pending', // CRITICAL: Mark as pending so sync picks it up
                             payload: { ...payload, name: nameToSave }
                         });
                         toast.info("Offline: Local Ticket Updated");
                         triggerBackgroundSync();
                     } else {
-                        // Server ticket -> We MUST save this to db.orders so it appears in the UI as a pending ticket
-                        // We use the server ID as the tempId so we can track it.
-
-                        // Check if we already have a pending edit for this server ticket
+                        // Server ticket NOT in local DB? (Should be rare with full sync)
+                        // logic handles creating a new shadow copy
                         const existingPending = await db.orders.where('tempId').equals(currentTicketId!).first();
 
                         if (existingPending) {
@@ -580,6 +579,7 @@ const useCartState = (initialCustomers: any[] = [], initialEmployees: any[] = []
                                 items: payload.items,
                                 total: payload.total,
                                 customerId: payload.customer,
+                                status: 'pending', // CRITICAL: Ensure it stays pending
                                 payload: { ...payload, id: currentTicketId, name: nameToSave }
                             });
                             toast.info("Offline: Local Edit Updated");
