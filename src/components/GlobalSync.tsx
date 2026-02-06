@@ -50,8 +50,19 @@ export default function GlobalSync() {
 
         window.addEventListener('online', handleOnline);
 
+        // Backup Polling: Check for unsynced changes every 15 seconds
+        // This covers cases where the 'online' event is missed or the browser state is flaky
+        const intervalId = setInterval(() => {
+            if (navigator.onLine) {
+                // We run the full sync logic, which internally checks if there are pending items
+                // If nothing is pending, it does very little work (cheap DB query)
+                runGlobalSync();
+            }
+        }, 15000);
+
         return () => {
             window.removeEventListener('online', handleOnline);
+            clearInterval(intervalId);
         };
     }, []);
 
