@@ -118,13 +118,16 @@ export function syncPendingMutations(): Promise<SyncResult> {
 export function syncEvaluationsIntoLocalDB(): Promise<boolean> {
     console.log("[Sync-Pull] Starting full DB sync...");
 
+    const ts = Date.now();
+    const headers = { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' };
+
     return Promise.all([
-        fetch('/api/products').then(res => res.ok ? res.json() : []) as Promise<any[]>,
-        fetch('/api/services').then(res => res.ok ? res.json() : []) as Promise<any[]>,
-        fetch('/api/categories').then(res => res.ok ? res.json() : []) as Promise<any[]>,
-        fetch('/api/customers').then(res => res.ok ? res.json() : []) as Promise<any[]>,
-        fetch('/api/employees').then(res => res.ok ? res.json() : []) as Promise<any[]>,
-        fetch('/api/tickets').then(res => res.ok ? res.json() : []) as Promise<any[]>
+        fetch(`/api/products?t=${ts}`, { headers, cache: 'no-store' }).then(res => res.ok ? res.json() : []) as Promise<any[]>,
+        fetch(`/api/services?t=${ts}`, { headers, cache: 'no-store' }).then(res => res.ok ? res.json() : []) as Promise<any[]>,
+        fetch(`/api/categories?t=${ts}`, { headers, cache: 'no-store' }).then(res => res.ok ? res.json() : []) as Promise<any[]>,
+        fetch(`/api/customers?t=${ts}`, { headers, cache: 'no-store' }).then(res => res.ok ? res.json() : []) as Promise<any[]>,
+        fetch(`/api/employees?t=${ts}`, { headers, cache: 'no-store' }).then(res => res.ok ? res.json() : []) as Promise<any[]>,
+        fetch(`/api/tickets?t=${ts}`, { headers, cache: 'no-store' }).then(res => res.ok ? res.json() : []) as Promise<any[]>
     ])
         .then(([products, services, categories, customers, employees, tickets]) => {
             return db.transaction('rw', [db.products, db.services, db.categories, db.customers, db.employees, db.orders], () => {
