@@ -18,22 +18,19 @@ export default function GlobalSync() {
 
         const runGlobalSync = async () => {
             if (navigator.onLine) {
-                // 1. Pull latest data from cloud to local (Full Mirror)
-                const pullSuccess = await syncEvaluationsIntoLocalDB();
-                if (pullSuccess) {
-                    console.log("Full Sync Pull Complete");
-                }
-
-                // 2. Push Pending Changes
+                // 1. Push Pending Changes (Priority: Ensure server has our updates)
                 const { syncedCount: ordersCount } = await syncOrders();
                 const { syncedCount: mutationsCount } = await syncMutations();
 
-                if (pullSuccess || ordersCount > 0 || mutationsCount > 0) {
-                    console.log(`Sync Complete. Pull: ${pullSuccess}, Orders: ${ordersCount}, Mutations: ${mutationsCount}`);
-                    // Toast only on user-visible changes to avoid spam on background syncs
-                    if (ordersCount > 0 || mutationsCount > 0) {
-                        toast.success("Cloud Sync Complete");
-                    }
+                // 2. Pull latest data from cloud to local (Full Mirror)
+                // We do this AFTER pushing so we get the canonical version of what we just uploaded
+                const pullSuccess = await syncEvaluationsIntoLocalDB();
+
+                if (pullSuccess && (ordersCount > 0 || mutationsCount > 0)) {
+                    console.log("Sync Complete: Pushed changes and refreshed local DB.");
+                    toast.success("Cloud Sync Complete");
+                } else if (pullSuccess) {
+                    console.log("Data Refresh Complete");
                 }
             }
         };
